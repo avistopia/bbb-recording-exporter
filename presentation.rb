@@ -676,9 +676,9 @@ def render_video(duration, meeting_name)
   deskshare = !HIDE_DESKSHARE && File.file?("#{@published_files}/deskshare/deskshare.#{VIDEO_EXTENSION}")
   chat = !HIDE_CHAT && File.file?("#{@published_files}/chats/chat.svg")
 
-  render = "ffmpeg -f lavfi -i color=c=#{BACKGROUND_COLOR}:s=#{OUTPUT_WIDTH}x#{OUTPUT_HEIGHT} " \
+  render = "ffmpeg -stream_loop -1 -i /var/avistopia/resources/default-bg.mp4 " \
            "-f concat -safe 0 #{BASE_URI} -i #{@published_files}/timestamps/whiteboard_timestamps " \
-           "-framerate 10 -loop 1 -i #{@published_files}/cursor/cursor.svg "
+           "-framerate 10 -loop 1 -i #{@published_files}/cursor/cursor.svg " \
 
   if chat
     render << "-framerate 1 -loop 1 -i #{@published_files}/chats/chat.svg " \
