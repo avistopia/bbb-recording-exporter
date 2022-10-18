@@ -12,6 +12,7 @@ require 'loofah'
 require 'nokogiri'
 require 'optimist'
 require 'yaml'
+require 'etc'
 
 require File.expand_path('../../../lib/recordandplayback', __FILE__)
 require File.expand_path('../../../lib/recordandplayback/interval_tree', __FILE__)
@@ -65,9 +66,11 @@ REMOVE_REDUNDANT_SHAPES = false
 BENCHMARK_FFMPEG = false
 BENCHMARK = BENCHMARK_FFMPEG ? '-benchmark ' : ''
 
-THREADS = 4
+THREADS = p Etc.nprocessors
 
-BACKGROUND_COLOR = 'white'.freeze
+# Styling config
+BORDER_RADIUS = 30
+COMPONENT_MARGIN = 30
 
 CURSOR_RADIUS = 8
 
@@ -75,17 +78,42 @@ CURSOR_RADIUS = 8
 OUTPUT_WIDTH = 1920
 OUTPUT_HEIGHT = 1080
 
-# Playback layout
-WEBCAMS_WIDTH = 320
-WEBCAMS_HEIGHT = 240
+# Whiteboard/Deskshare/Slides config
+SLIDES_WIDTH = 1500 - 2 * COMPONENT_MARGIN
+SLIDES_HEIGHT = SLIDES_WIDTH * 9 / 16
+SLIDES_X = COMPONENT_MARGIN
+SLIDES_Y = COMPONENT_MARGIN
 
-CHAT_WIDTH = WEBCAMS_WIDTH
-CHAT_HEIGHT = OUTPUT_HEIGHT - WEBCAMS_HEIGHT
+HIDE_DESKSHARE = false
+
+WhiteboardElement = Struct.new(:begin, :end, :value, :id)
+WhiteboardSlide = Struct.new(:href, :begin, :end, :width, :height)
+
+# Webcams config
+WEBCAMS_WIDTH = OUTPUT_WIDTH - SLIDES_WIDTH - 3 * COMPONENT_MARGIN
+WEBCAMS_HEIGHT = WEBCAMS_WIDTH * 3 / 4
+WEBCAMS_X = SLIDES_WIDTH + 2 * COMPONENT_MARGIN
+WEBCAMS_Y = COMPONENT_MARGIN
+
+# Chat config
+CHAT_BOTTOM_MARGIN = 90
+CHAT_PADDING = 20
+
+CHAT_OUTER_WIDTH = WEBCAMS_WIDTH
+CHAT_OUTER_HEIGHT = OUTPUT_HEIGHT - WEBCAMS_HEIGHT - 2 * COMPONENT_MARGIN - CHAT_BOTTOM_MARGIN
+CHAT_OUTER_X = SLIDES_WIDTH + 2 * COMPONENT_MARGIN
+CHAT_OUTER_Y = WEBCAMS_HEIGHT + 2 * COMPONENT_MARGIN
+
+CHAT_WIDTH = CHAT_OUTER_WIDTH - 2 * CHAT_PADDING
+CHAT_HEIGHT = CHAT_OUTER_HEIGHT - 2 * CHAT_PADDING
+CHAT_X = CHAT_PADDING
+CHAT_Y = CHAT_PADDING
+
+CHAT_BG_COLOR = "0x000000" # black (ffmpeg syntax)
+CHAT_FG_COLOR = "#ffffff" # white (css syntax)
 
 HIDE_CHAT = false
 HIDE_CHAT_NAMES = false
-
-HIDE_DESKSHARE = false
 
 # Assumes a monospaced font with a width to aspect ratio of 3:5
 CHAT_FONT_SIZE = 15
@@ -96,21 +124,6 @@ CHAT_STARTING_OFFSET = CHAT_HEIGHT + CHAT_FONT_SIZE
 CHAT_CANVAS_WIDTH = (8032 / CHAT_WIDTH) * CHAT_WIDTH
 CHAT_CANVAS_HEIGHT = (32_767 / CHAT_FONT_SIZE) * CHAT_FONT_SIZE
 
-# Dimensions of the whiteboard area
-SLIDES_WIDTH = OUTPUT_WIDTH - WEBCAMS_WIDTH
-SLIDES_HEIGHT = OUTPUT_HEIGHT
-
-# Input deskshare dimensions. Is scaled to fit whiteboard area keeping aspect ratio
-DESKSHARE_INPUT_WIDTH = 1280
-DESKSHARE_INPUT_HEIGHT = 720
-
-# Center the deskshare
-DESKSHARE_Y_OFFSET = ((SLIDES_HEIGHT -
-([SLIDES_WIDTH.to_f / DESKSHARE_INPUT_WIDTH,
-  SLIDES_HEIGHT.to_f / DESKSHARE_INPUT_HEIGHT].min * DESKSHARE_INPUT_HEIGHT)) / 2).to_i
-
-WhiteboardElement = Struct.new(:begin, :end, :value, :id)
-WhiteboardSlide = Struct.new(:href, :begin, :end, :width, :height)
 
 def run_command(command, silent = false)
   BigBlueButton.logger.info("Running: #{command}") unless silent
@@ -453,6 +466,12 @@ def parse_chat(chat_reader)
   messages
 end
 
+def is_rtl(text)
+  ltrChars = "A-Za-z\u{00C0}-\u{00D6}\u{00D8}-\u{00F6}\u{00F8}-\u{02B8}\u{0300}-\u{0590}\u{0800}-\u{1FFF}\u{2C00}-\u{FB1C}\u{FDFE}-\u{FE6F}\u{FEFD}-\u{FFFF}"
+  rtlChars = "\u{0591}-\u{07FF}\u{FB1D}-\u{FDFD}\u{FE70}-\u{FEFC}"
+  return /^[^#{ltrChars}]*[#{rtlChars}]/.match?(text)
+end
+
 def render_chat(chat_reader)
   messages = parse_chat(chat_reader)
   return if messages.empty?
@@ -475,7 +494,15 @@ def render_chat(chat_reader)
   builder = Builder::XmlMarkup.new
   builder.instruct!
   builder.svg(width: CHAT_CANVAS_WIDTH, height: CHAT_CANVAS_HEIGHT, 'xmlns' => 'http://www.w3.org/2000/svg') do
-    builder.style { builder << "text{font-family: monospace; font-size: #{CHAT_FONT_SIZE}}" }
+    builder.style {
+      builder << "
+        text{
+          font-family: monospace;
+          font-size: #{CHAT_FONT_SIZE};
+          fill: #{CHAT_FG_COLOR};
+        }
+      "
+    }
 
     messages.each do |timestamp, name, chat|
       # Strip HTML tags e.g. from links so it only displays the inner text
@@ -487,6 +514,9 @@ def render_chat(chat_reader)
       line_breaks = [-1]
       line_index = 0
       last_linebreak_pos = 0
+      is_chat_rtl = is_rtl(chat)
+      rtl_text_x_offset = is_chat_rtl ? (CHAT_OUTER_WIDTH - CHAT_PADDING) : 0
+      text_anchor = is_chat_rtl ? 'end' : 'start'
 
       chat_length = chat.length - 1
       (0..chat_length).each do |chat_index|
@@ -525,7 +555,7 @@ def render_chat(chat_reader)
 
           duplicate_content.each do |content|
             duplicate_y -= CHAT_FONT_SIZE
-            builder.text(x: duplicate_x, y: duplicate_y) { builder << content }
+            builder.text(x: duplicate_x + rtl_text_x_offset, y: duplicate_y, 'text-anchor' => text_anchor) { builder << content }
           end
 
           duplicate_y -= CHAT_FONT_SIZE
@@ -559,7 +589,7 @@ def render_chat(chat_reader)
       line_wraps.each do |a, b|
         safe_message = Loofah.fragment(chat[a..b]).scrub!(:escape)
 
-        builder.text(x: svg_x, y: svg_y) { builder << safe_message }
+        builder.text(x: svg_x + rtl_text_x_offset, y: svg_y, 'text-anchor' => text_anchor) { builder << safe_message }
         svg_y += CHAT_FONT_SIZE
 
         duplicate_content.unshift(safe_message)
@@ -671,63 +701,98 @@ def render_cursor(panzooms, cursor_reader)
   end
 end
 
+def filter_complex_round(input, radius, output, default_alpha=255)
+  return                                                                                  \
+    "[#{input}]"                                                                          \
+    "format=yuva420p,"                                                                    \
+    "geq="                                                                                \
+      "lum='p(X,Y)':"                                                                     \
+      "a='if("                                                                            \
+        "gt(abs(W/2-X),W/2-#{radius})*gt(abs(H/2-Y),H/2-#{radius}),"                      \
+        "if("                                                                             \
+          "lte(hypot(#{radius}-(W/2-abs(W/2-X)),#{radius}-(H/2-abs(H/2-Y))),#{radius}),"  \
+          "#{default_alpha},"                                                             \
+          "0"                                                                             \
+        "),"                                                                              \
+        "#{default_alpha}"                                                                \
+      ")'"                                                                                \
+    "[#{output}];"
+end
+
 def render_video(duration, meeting_name)
   # Determine if video had screensharing / chat messages
   deskshare = !HIDE_DESKSHARE && File.file?("#{@published_files}/deskshare/deskshare.#{VIDEO_EXTENSION}")
   chat = !HIDE_CHAT && File.file?("#{@published_files}/chats/chat.svg")
 
-  render = "ffmpeg -stream_loop -1 -i /var/avistopia/resources/default-bg.mp4 " \
-           "-f concat -safe 0 #{BASE_URI} -i #{@published_files}/timestamps/whiteboard_timestamps " \
-           "-framerate 10 -loop 1 -i #{@published_files}/cursor/cursor.svg " \
+  render = "ffmpeg "
 
-  if chat
-    render << "-framerate 1 -loop 1 -i #{@published_files}/chats/chat.svg " \
-              "-i #{@published_files}/video/webcams.#{VIDEO_EXTENSION} "
+  render << "-stream_loop -1 -i /var/avistopia/resources/default-bg.mp4 "
+  last_input_num = 0
+  bg_input_num = last_input_num
 
-    render << if deskshare
-       "-i #{@published_files}/deskshare/deskshare.#{VIDEO_EXTENSION} -filter_complex " \
-         "'[2]sendcmd=f=#{@published_files}/timestamps/cursor_timestamps[cursor];" \
-         "[3]sendcmd=f=#{@published_files}/timestamps/chat_timestamps," \
-         "crop@c=w=#{CHAT_WIDTH}:h=#{CHAT_HEIGHT}:x=0:y=0[chat];" \
-         "[4]scale=w=#{WEBCAMS_WIDTH}:h=#{WEBCAMS_HEIGHT}[webcams];" \
-         "[5]scale=w=#{SLIDES_WIDTH}:h=#{SLIDES_HEIGHT}:force_original_aspect_ratio=1[deskshare];" \
-         "[0][deskshare]overlay=x=#{WEBCAMS_WIDTH}:y=#{DESKSHARE_Y_OFFSET}[screenshare];" \
-         "[screenshare][1]overlay=x=#{WEBCAMS_WIDTH}[slides];" \
-                  '[slides][cursor]overlay@m[whiteboard];' \
-         "[whiteboard][chat]overlay=y=#{WEBCAMS_HEIGHT}[chats];" \
-         "[chats][webcams]overlay' "
-     else
-        "-filter_complex '[2]sendcmd=f=#{@published_files}/timestamps/cursor_timestamps[cursor];" \
-          "[3]sendcmd=f=#{@published_files}/timestamps/chat_timestamps," \
-          "crop@c=w=#{CHAT_WIDTH}:h=#{CHAT_HEIGHT}:x=0:y=0[chat];" \
-          "[4]scale=w=#{WEBCAMS_WIDTH}:h=#{WEBCAMS_HEIGHT}[webcams];" \
-          "[0][1]overlay=x=#{WEBCAMS_WIDTH}[slides];" \
-                  '[slides][cursor]overlay@m[whiteboard];' \
-          "[whiteboard][chat]overlay=y=#{WEBCAMS_HEIGHT}[chats];[chats][webcams]overlay' "
-               end
-  else
-    render << "-i #{@published_files}/video/webcams.#{VIDEO_EXTENSION} "
+  render << "-f concat -safe 0 #{BASE_URI} -i #{@published_files}/timestamps/whiteboard_timestamps "
+  last_input_num += 1
+  whiteboard_timestamps_input_num = last_input_num
 
-    render << if deskshare
-      "-i #{@published_files}/deskshare/deskshare.#{VIDEO_EXTENSION} -filter_complex " \
-        "'[2]sendcmd=f=#{@published_files}/timestamps/cursor_timestamps[cursor];" \
-        "[3]scale=w=#{WEBCAMS_WIDTH}:h=#{WEBCAMS_HEIGHT}[webcams];" \
-        "[4]scale=w=#{SLIDES_WIDTH}:h=#{SLIDES_HEIGHT}:force_original_aspect_ratio=1[deskshare];" \
-        "[0][deskshare]overlay=x=#{WEBCAMS_WIDTH}:y=#{DESKSHARE_Y_OFFSET}[screenshare];" \
-        "[screenshare][1]overlay=x=#{WEBCAMS_WIDTH}[slides];" \
-                  '[slides][cursor]overlay@m[whiteboard];' \
-        "[whiteboard][webcams]overlay' "
-    else
-      "-filter_complex '[2]sendcmd=f=#{@published_files}/timestamps/cursor_timestamps[cursor];" \
-        "[3]scale=w=#{WEBCAMS_WIDTH}:h=#{WEBCAMS_HEIGHT}[webcams];" \
-        "[0][1]overlay=x=#{WEBCAMS_WIDTH}[slides];" \
-                  '[slides][cursor]overlay@m[whiteboard];' \
-        "[whiteboard][webcams]overlay' "
-              end
+  render << "-framerate 10 -loop 1 -i #{@published_files}/cursor/cursor.svg "
+  last_input_num += 1
+  cursor_input_num = last_input_num
+
+  render << "-i #{@published_files}/video/webcams.#{VIDEO_EXTENSION} "
+  last_input_num += 1
+  webcams_input_num = last_input_num
+
+  if deskshare
+    render << "-i #{@published_files}/deskshare/deskshare.#{VIDEO_EXTENSION} "
+    last_input_num += 1
+    deskshare_input_num = last_input_num
   end
 
-  render << "-c:a aac -crf #{CONSTANT_RATE_FACTOR} -shortest -y -t #{duration} -threads #{THREADS} " \
-            "-metadata title=#{Shellwords.escape("#{meeting_name}")} #{BENCHMARK} #{@published_files}/meeting-tmp.mp4"
+  if chat
+    render << "-f lavfi -i color=c=#{CHAT_BG_COLOR}:size=#{CHAT_OUTER_WIDTH}x#{CHAT_OUTER_HEIGHT} "
+    last_input_num += 1
+    chat_bg_input_num = last_input_num
+    render << "-framerate 1 -loop 1 -i #{@published_files}/chats/chat.svg "
+    last_input_num += 1
+    chat_input_num = last_input_num
+  end
+
+  # beginning of filter_complex
+  render << \
+    "-filter_complex \"" \
+    "[#{cursor_input_num}]sendcmd=f=#{@published_files}/timestamps/cursor_timestamps[cursor];" \
+    "[#{webcams_input_num}]scale=w=#{WEBCAMS_WIDTH}:h=#{WEBCAMS_HEIGHT}[webcams__not_rounded];" \
+    + filter_complex_round("webcams__not_rounded", BORDER_RADIUS, "webcams")
+
+  if deskshare
+    render << \
+      "[#{deskshare_input_num}]scale=w=#{SLIDES_WIDTH}:h=#{SLIDES_HEIGHT}:force_original_aspect_ratio=1[deskshare];" \
+      "[deskshare][#{whiteboard_timestamps_input_num}]overlay[maincomponent];"
+  else
+    render << "[#{whiteboard_timestamps_input_num}]overlay[maincomponent];"
+  end
+
+  render << \
+    "[maincomponent][cursor]overlay@m[maincomponent_cursor__not_rounded];" \
+    + filter_complex_round("maincomponent_cursor__not_rounded", BORDER_RADIUS, "maincomponent_cursor") + \
+    "[#{bg_input_num}][maincomponent_cursor]overlay=x=#{SLIDES_X}:y=#{SLIDES_Y}[bg_maincomponent_cursor];"
+  last_stream_name = 'bg_maincomponent_cursor'
+
+  if chat
+    render << \
+      "[#{chat_input_num}]sendcmd=f=#{@published_files}/timestamps/chat_timestamps," \
+      "crop@c=w=#{CHAT_WIDTH}:h=#{CHAT_HEIGHT}:x=0:y=0[chat__no_bg];" \
+      + filter_complex_round(chat_bg_input_num, BORDER_RADIUS, "chat_bg", 153) + \
+      "[chat_bg][chat__no_bg]overlay=x=#{CHAT_X}:y=#{CHAT_Y}[chat];" \
+      "[bg_maincomponent_cursor][chat]overlay=x=#{CHAT_OUTER_X}:y=#{CHAT_OUTER_Y}[bg_maincomponent_cursor_chat];"
+    last_stream_name = 'bg_maincomponent_cursor_chat'
+  end
+  render << "[#{last_stream_name}][webcams]overlay=x=#{WEBCAMS_X}:y=#{WEBCAMS_Y}\" "
+  # end of filter_complex
+
+  render << \
+    "-c:a aac -crf #{CONSTANT_RATE_FACTOR} -shortest -y -t #{duration} -threads #{THREADS} " \
+    "-metadata title=#{Shellwords.escape("#{meeting_name}")} #{BENCHMARK} #{@published_files}/meeting-tmp.mp4"
 
   success, = run_command(render)
   unless success
