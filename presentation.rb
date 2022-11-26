@@ -124,6 +124,8 @@ CHAT_STARTING_OFFSET = CHAT_HEIGHT + CHAT_FONT_SIZE
 CHAT_CANVAS_WIDTH = (8032 / CHAT_WIDTH) * CHAT_WIDTH
 CHAT_CANVAS_HEIGHT = (32_767 / CHAT_FONT_SIZE) * CHAT_FONT_SIZE
 
+BACK_SLASH = '\\'
+
 
 def run_command(command, silent = false)
   BigBlueButton.logger.info("Running: #{command}") unless silent
@@ -238,7 +240,7 @@ def measure_string(s, font_size)
   # DejaVuSans, the default truefont of Debian, can be used here
   # /usr/share/fonts/truetype/dejavu/DejaVuSans.ttf
   # use ImageMagick to measure the string in pixels
-  command = "convert xc: -font /usr/share/fonts/truetype/msttcorefonts/Arial.ttf -pointsize #{font_size} -debug annotate -annotate 0 #{Shellwords.escape(s)} null: 2>&1"
+  command = "convert xc: -font /usr/share/fonts/truetype/dejavu/DejaVuSans.ttf -pointsize #{font_size} -debug annotate -annotate 0 #{Shellwords.escape(s).gsub(BACK_SLASH * 2){ BACK_SLASH * 4 }} null: 2>&1"
   _, output = run_command(command, true)
   output.match(/; width: (\d+);/)[1].to_f
 end
@@ -515,7 +517,7 @@ def render_chat(chat_reader)
       line_index = 0
       last_linebreak_pos = 0
       is_chat_rtl = is_rtl(chat)
-      rtl_text_x_offset = is_chat_rtl ? (CHAT_OUTER_WIDTH - CHAT_PADDING) : 0
+      rtl_text_x_offset = is_chat_rtl ? CHAT_WIDTH : 0
       text_anchor = is_chat_rtl ? 'end' : 'start'
 
       chat_length = chat.length - 1
@@ -792,6 +794,7 @@ def render_video(duration, meeting_name)
 
   render << \
     "-c:a aac -crf #{CONSTANT_RATE_FACTOR} -shortest -y -t #{duration} -threads #{THREADS} " \
+    "-map #{webcams_input_num}:a " \
     "-metadata title=#{Shellwords.escape("#{meeting_name}")} #{BENCHMARK} #{@published_files}/meeting-tmp.mp4"
 
   success, = run_command(render)
