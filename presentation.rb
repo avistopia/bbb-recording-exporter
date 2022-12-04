@@ -12,7 +12,6 @@ require 'loofah'
 require 'nokogiri'
 require 'optimist'
 require 'yaml'
-require 'etc'
 
 require File.expand_path('../../../lib/recordandplayback', __FILE__)
 require File.expand_path('../../../lib/recordandplayback/interval_tree', __FILE__)
@@ -66,7 +65,7 @@ REMOVE_REDUNDANT_SHAPES = false
 BENCHMARK_FFMPEG = false
 BENCHMARK = BENCHMARK_FFMPEG ? '-benchmark ' : ''
 
-THREADS = p Etc.nprocessors
+THREADS = 4 # @TODO make it smart
 
 # Styling config
 BORDER_RADIUS = 30
