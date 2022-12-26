@@ -65,7 +65,7 @@ REMOVE_REDUNDANT_SHAPES = false
 BENCHMARK_FFMPEG = false
 BENCHMARK = BENCHMARK_FFMPEG ? '-benchmark ' : ''
 
-THREADS = 2 # @TODO make it smart
+THREADS = 6 # @TODO make it smart
 
 # Styling config
 BORDER_RADIUS = 30
